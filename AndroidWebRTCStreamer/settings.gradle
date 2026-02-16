@@ -11,9 +11,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url "https://jitpack.io" }
+        // ⚠️ JitPack eliminado para evitar errores
     }
 }
 
 rootProject.name = "AndroidWebRTCStreamer"
 include(":app")
+
