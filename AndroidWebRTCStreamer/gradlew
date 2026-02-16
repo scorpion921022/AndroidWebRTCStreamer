@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+
+##############################################################################
+## Gradle wrapper script for UNIX
+##############################################################################
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+JAVA_EXEC="${JAVA_HOME:-}/bin/java"
+
+if [ ! -x "$JAVA_EXEC" ]; then
+  JAVA_EXEC="java"
+fi
+
+exec "$JAVA_EXEC" -classpath "$DIR/gradle/wrapper/gradle-wrapper.jar" org.gradle.wrapper.GradleWrapperMain "$@"
