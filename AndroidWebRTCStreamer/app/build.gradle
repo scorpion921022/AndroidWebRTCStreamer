@@ -32,5 +32,6 @@ android {
 }
 
 dependencies {
-    implementation "org.webrtc:google-webrtc:1.0.32006"
+    implementation "com.github.webrtc-sdk:android:104.5112.05"
 }
+
