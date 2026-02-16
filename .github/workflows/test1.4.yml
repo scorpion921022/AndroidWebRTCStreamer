@@ -1,0 +1,40 @@
+name: Android APK Build
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Locate gradlew
+        id: gradle
+        run: |
+          GRADLEW_PATH=$(find . -type f -name gradlew | head -n 1)
+          echo "Found gradlew at: $GRADLEW_PATH"
+          echo "gradlew_path=$GRADLEW_PATH" >> $GITHUB_OUTPUT
+
+      - name: Grant execute permission
+        run: chmod +x "${{ steps.gradle.outputs.gradlew_path }}"
+
+      - name: Build APK
+        run: |
+          cd "$(dirname "${{ steps.gradle.outputs.gradlew_path }}")"
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: "**/app/build/outputs/apk/debug/app-debug.apk"
