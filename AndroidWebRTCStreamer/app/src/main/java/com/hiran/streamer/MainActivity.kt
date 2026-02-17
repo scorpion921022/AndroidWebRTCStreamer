@@ -150,18 +150,59 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendWhipOffer(offer: SessionDescription) {
-        val client = OkHttpClient()
-        val body = offer.description.toRequestBody("application/sdp".toMediaType())
-        val request = Request.Builder()
-            .url(whipUrl)
-            .post(body)
-            .build()
+    val client = OkHttpClient()
 
-        client.newCall(request).execute().use {
-            Log.d("WHIP", "Response: ${it.code}")
+    val body = offer.description
+        .toRequestBody("application/sdp".toMediaType())
+
+    val request = Request.Builder()
+        .url(whipUrl)
+        .post(body)
+        .addHeader("Content-Type", "application/sdp")
+        .build()
+
+    Thread {
+        try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.e("WHIP", "HTTP ${response.code}")
+                    return@use
+                }
+
+                val answerSdp = response.body?.string()
+                if (answerSdp.isNullOrEmpty()) {
+                    Log.e("WHIP", "Empty SDP answer")
+                    return@use
+                }
+
+                Log.d("WHIP", "SDP answer received")
+
+                val answer = SessionDescription(
+                    SessionDescription.Type.ANSWER,
+                    answerSdp
+                )
+
+                peerConnection.setRemoteDescription(object : SdpObserver {
+                    override fun onSetSuccess() {
+                        Log.d("WHIP", "Remote SDP set, streaming started")
+                    }
+
+                    override fun onSetFailure(error: String?) {
+                        Log.e("WHIP", "Set remote SDP failed: $error")
+                    }
+
+                    override fun onCreateSuccess(p0: SessionDescription?) {}
+                    override fun onCreateFailure(p0: String?) {}
+                }, answer)
+            }
+        } catch (e: Exception) {
+            Log.e("WHIP", "WHIP error: ${e.message}")
         }
-    }
+    }.start()
 }
+
+}
+
 
 
 
