@@ -26,7 +26,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var peerConnectionFactory: PeerConnectionFactory
     private lateinit var peerConnection: PeerConnection
 
-    private val whipUrl = "http://10.20.30.1:8889/gameplay/whip"
+    private val whipUrl = "http://10.20.30.41:8889/gameplay/whip"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -202,6 +202,7 @@ class MainActivity : AppCompatActivity() {
 }
 
 }
+
 
 
 
