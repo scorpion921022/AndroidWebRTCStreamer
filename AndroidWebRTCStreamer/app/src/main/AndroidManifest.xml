@@ -1,15 +1,12 @@
-<?xml version="1.0" encoding="utf-8"?>
-<manifest package="com.hiran.streamer"
-    xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 
     <application
+        android:theme="@style/Theme.AppCompat.Light.NoActionBar"
         android:allowBackup="true"
-        android:label="WebRTC Streamer"
-        android:theme="@style/Theme.Material3.DayNight.NoActionBar">
+        android:label="WebRTC Stream">
 
         <activity
             android:name=".MainActivity"
@@ -21,8 +18,9 @@
             </intent-filter>
 
         </activity>
-
     </application>
 </manifest>
+
+
 
 
