@@ -51,20 +51,28 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
 
-        if (requestCode == SCREEN_CAPTURE_REQUEST && resultCode == Activity.RESULT_OK && data != null) {
+        if (requestCode == SCREEN_CAPTURE_REQUEST &&
+            resultCode == Activity.RESULT_OK &&
+            data != null
+        ) {
             startStreaming(data)
         }
     }
 
     private fun initWebRTC() {
         PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions()
+            PeerConnectionFactory.InitializationOptions
+                .builder(this)
+                .createInitializationOptions()
         )
 
-        peerConnectionFactory = PeerConnectionFactory.builder().createPeerConnectionFactory()
+        peerConnectionFactory = PeerConnectionFactory.builder()
+            .createPeerConnectionFactory()
 
         val iceServers = listOf(
-            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
+            PeerConnection.IceServer
+                .builder("stun:stun.l.google.com:19302")
+                .createIceServer()
         )
 
         peerConnection = peerConnectionFactory.createPeerConnection(
@@ -86,46 +94,63 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startStreaming(permissionData: Intent) {
-    try {
-        val eglBase = EglBase.create()
+        try {
+            val eglBase = EglBase.create()
 
-        // Crear video source
-        val videoSource = peerConnectionFactory.createVideoSource(false)
-        val videoTrack = peerConnectionFactory.createVideoTrack("SCREEN", videoSource)
+            val videoSource = peerConnectionFactory.createVideoSource(false)
+            val videoTrack =
+                peerConnectionFactory.createVideoTrack("SCREEN", videoSource)
 
-        // Callback real para MediaProjection
-        val mediaProjectionCallback = object : MediaProjection.Callback() {
-            override fun onStop() {
-                Log.d("WebRTC", "Screen capture stopped")
+            val projectionCallback = object : MediaProjection.Callback() {
+                override fun onStop() {
+                    Log.d("WebRTC", "Screen capture stopped")
+                }
             }
+
+            val capturer = ScreenCapturerAndroid(permissionData, projectionCallback)
+
+            val surfaceHelper = SurfaceTextureHelper.create(
+                "ScreenCaptureThread",
+                eglBase.eglBaseContext
+            )
+
+            capturer.initialize(
+                surfaceHelper,
+                this,
+                videoSource.capturerObserver
+            )
+
+            capturer.startCapture(720, 1600, 30)
+
+            peerConnection.addTrack(videoTrack)
+
+            createOffer()
+
+        } catch (e: Exception) {
+            Log.e("WebRTC", "Error starting stream: ${e.message}")
         }
-
-        // Crear capturador de pantalla
-        val capturer = ScreenCapturerAndroid(permissionData, mediaProjectionCallback)
-
-        // Surface helper en hilo separado
-        val surfaceHelper = SurfaceTextureHelper.create("ScreenCaptureThread", eglBase.eglBaseContext)
-
-        // Inicializar capturador
-        capturer.initialize(surfaceHelper, this, videoSource.capturerObserver)
-
-        // Captura a 720x1600 @30fps
-        capturer.startCapture(720, 1600, 30)
-
-        // Agregar track al PeerConnection
-        peerConnection.addTrack(videoTrack)
-
-        // Crear oferta WHIP
-        createOffer()
-
-    } catch (e: Exception) {
-        Log.e("WebRTC", "Error starting stream: ${e.message}")
     }
-}
 
-
+    /**
+     * AQUÍ VAN LOS MediaConstraints
+     * WHIP normalmente NO soporta Trickle ICE
+     */
     private fun createOffer() {
         val constraints = MediaConstraints()
+
+        constraints.mandatory.add(
+            MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false")
+        )
+        constraints.mandatory.add(
+            MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false")
+        )
+        constraints.mandatory.add(
+            MediaConstraints.KeyValuePair("IceRestart", "false")
+        )
+
+        constraints.optional.add(
+            MediaConstraints.KeyValuePair("TrickleIce", "false")
+        )
 
         peerConnection.createOffer(object : SdpObserver {
             override fun onCreateSuccess(desc: SessionDescription) {
@@ -134,7 +159,10 @@ class MainActivity : AppCompatActivity() {
                         sendWhipOffer(desc)
                     }
 
-                    override fun onSetFailure(p0: String?) {}
+                    override fun onSetFailure(error: String?) {
+                        Log.e("WHIP", "Set local SDP failed: $error")
+                    }
+
                     override fun onCreateSuccess(p0: SessionDescription?) {}
                     override fun onCreateFailure(p0: String?) {}
                 }, desc)
@@ -150,58 +178,68 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendWhipOffer(offer: SessionDescription) {
-    val client = OkHttpClient()
+        val client = OkHttpClient()
 
-    val body = offer.description
-        .toRequestBody("application/sdp".toMediaType())
+        val body = offer.description
+            .toRequestBody("application/sdp".toMediaType())
 
-    val request = Request.Builder()
-        .url(whipUrl)
-        .post(body)
-        .addHeader("Content-Type", "application/sdp")
-        .build()
+        val request = Request.Builder()
+            .url(whipUrl)
+            .post(body)
+            .addHeader("Content-Type", "application/sdp")
+            .build()
 
-    Thread {
-        try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.e("WHIP", "HTTP ${response.code}")
-                    return@use
-                }
-
-                val answerSdp = response.body?.string()
-                if (answerSdp.isNullOrEmpty()) {
-                    Log.e("WHIP", "Empty SDP answer")
-                    return@use
-                }
-
-                Log.d("WHIP", "SDP answer received")
-
-                val answer = SessionDescription(
-                    SessionDescription.Type.ANSWER,
-                    answerSdp
-                )
-
-                peerConnection.setRemoteDescription(object : SdpObserver {
-                    override fun onSetSuccess() {
-                        Log.d("WHIP", "Remote SDP set, streaming started")
+        Thread {
+            try {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.e("WHIP", "HTTP ${response.code}")
+                        return@use
                     }
 
-                    override fun onSetFailure(error: String?) {
-                        Log.e("WHIP", "Set remote SDP failed: $error")
+                    val answerSdp = response.body?.string()
+                    if (answerSdp.isNullOrEmpty()) {
+                        Log.e("WHIP", "Empty SDP answer")
+                        return@use
                     }
 
-                    override fun onCreateSuccess(p0: SessionDescription?) {}
-                    override fun onCreateFailure(p0: String?) {}
-                }, answer)
+                    Log.d("WHIP", "SDP answer received")
+
+                    val answer = SessionDescription(
+                        SessionDescription.Type.ANSWER,
+                        answerSdp
+                    )
+
+                    peerConnection.setRemoteDescription(
+                        object : SdpObserver {
+                            override fun onSetSuccess() {
+                                Log.d(
+                                    "WHIP",
+                                    "Remote SDP set — STREAMING ACTIVE"
+                                )
+                            }
+
+                            override fun onSetFailure(error: String?) {
+                                Log.e(
+                                    "WHIP",
+                                    "Set remote SDP failed: $error"
+                                )
+                            }
+
+                            override fun onCreateSuccess(p0: SessionDescription?) {}
+                            override fun onCreateFailure(p0: String?) {}
+                        },
+                        answer
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("WHIP", "WHIP error: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.e("WHIP", "WHIP error: ${e.message}")
-        }
-    }.start()
+        }.start()
+    }
 }
 
-}
+
 
 
 
