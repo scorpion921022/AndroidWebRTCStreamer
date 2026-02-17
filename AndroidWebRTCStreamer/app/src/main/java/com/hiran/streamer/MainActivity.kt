@@ -41,7 +41,6 @@ class MainActivity : AppCompatActivity() {
         initWebRTC()
 
         btnStart.setOnClickListener {
-            Log.d(TAG, "Requesting screen permission")
             startActivityForResult(
                 projectionManager.createScreenCaptureIntent(),
                 SCREEN_CAPTURE_REQUEST
@@ -60,12 +59,11 @@ class MainActivity : AppCompatActivity() {
             resultCode == Activity.RESULT_OK &&
             data != null
         ) {
-            Log.d(TAG, "Screen permission granted")
             startStreaming(data)
         }
     }
 
-    // -------------------- WEBRTC INIT --------------------
+    // ---------------------------------------------------
 
     private fun initWebRTC() {
 
@@ -84,7 +82,7 @@ class MainActivity : AppCompatActivity() {
                 DefaultVideoEncoderFactory(
                     eglBase.eglBaseContext,
                     true,
-                    true
+                    false // ⬅️ H264 BASELINE
                 )
             )
             .setVideoDecoderFactory(
@@ -108,15 +106,10 @@ class MainActivity : AppCompatActivity() {
             config,
             object : PeerConnection.Observer {
 
-                override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) {
-                    Log.d(TAG, "ICE gathering: $state")
-                }
-
-                override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
-                    Log.d(TAG, "ICE connection: $state")
-                }
-
                 override fun onSignalingChange(state: PeerConnection.SignalingState) {}
+                override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {}
+                override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+                override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) {}
                 override fun onIceCandidate(candidate: IceCandidate) {}
                 override fun onIceCandidatesRemoved(candidates: Array<IceCandidate>) {}
                 override fun onAddStream(stream: MediaStream) {}
@@ -131,22 +124,16 @@ class MainActivity : AppCompatActivity() {
         )!!
     }
 
-    // -------------------- STREAM --------------------
+    // ---------------------------------------------------
 
     private fun startStreaming(permissionData: Intent) {
-
-        Log.d(TAG, "Starting screen capture")
 
         val videoSource = factory.createVideoSource(false)
         val videoTrack = factory.createVideoTrack("screen", videoSource)
 
         val capturer = ScreenCapturerAndroid(
             permissionData,
-            object : MediaProjection.Callback() {
-                override fun onStop() {
-                    Log.d(TAG, "MediaProjection stopped")
-                }
-            }
+            object : MediaProjection.Callback() {}
         )
 
         val helper = SurfaceTextureHelper.create(
@@ -159,7 +146,6 @@ class MainActivity : AppCompatActivity() {
 
         pc.addTrack(videoTrack)
 
-        // 🔥 OBLIGATORIO PARA WHIP
         pc.addTransceiver(
             MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
             RtpTransceiver.RtpTransceiverInit(
@@ -170,7 +156,7 @@ class MainActivity : AppCompatActivity() {
         createOffer()
     }
 
-    // -------------------- WHIP --------------------
+    // ---------------------------------------------------
 
     private fun createOffer() {
 
@@ -186,12 +172,10 @@ class MainActivity : AppCompatActivity() {
         pc.createOffer(object : SdpObserver {
 
             override fun onCreateSuccess(desc: SessionDescription) {
-                Log.d(TAG, "SDP offer created")
                 pc.setLocalDescription(this, desc)
             }
 
             override fun onSetSuccess() {
-                Log.d(TAG, "Local SDP set")
                 sendWhipOffer(pc.localDescription!!)
             }
 
@@ -208,8 +192,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun sendWhipOffer(offer: SessionDescription) {
 
-        Log.d(TAG, "Sending WHIP offer")
-
         val body = offer.description
             .toRequestBody("application/sdp".toMediaType())
 
@@ -221,14 +203,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 OkHttpClient().newCall(request).execute().use { res ->
-
-                    Log.d(TAG, "WHIP HTTP ${res.code}")
-
-                    val answerSdp = res.body?.string()
-                    if (answerSdp.isNullOrBlank()) {
-                        Log.e(TAG, "Empty SDP answer")
-                        return@use
-                    }
+                    val answer = res.body?.string() ?: return@use
 
                     pc.setRemoteDescription(
                         object : SdpObserver {
@@ -236,16 +211,13 @@ class MainActivity : AppCompatActivity() {
                                 Log.d(TAG, "STREAMING ACTIVE 🚀")
                             }
 
-                            override fun onSetFailure(error: String?) {
-                                Log.e(TAG, "Set remote SDP error: $error")
-                            }
-
+                            override fun onSetFailure(error: String?) {}
                             override fun onCreateSuccess(p0: SessionDescription?) {}
                             override fun onCreateFailure(p0: String?) {}
                         },
                         SessionDescription(
                             SessionDescription.Type.ANSWER,
-                            answerSdp
+                            answer
                         )
                     )
                 }
