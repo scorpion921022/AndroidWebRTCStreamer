@@ -17,14 +17,16 @@ import org.webrtc.*
 class MainActivity : AppCompatActivity() {
 
     companion object {
+        private const val TAG = "WHIP-ANDROID"
         private const val SCREEN_CAPTURE_REQUEST = 1001
     }
 
     private lateinit var btnStart: Button
-    private lateinit var mediaProjectionManager: MediaProjectionManager
+    private lateinit var projectionManager: MediaProjectionManager
 
-    private lateinit var peerConnectionFactory: PeerConnectionFactory
-    private lateinit var peerConnection: PeerConnection
+    private lateinit var factory: PeerConnectionFactory
+    private lateinit var pc: PeerConnection
+    private lateinit var eglBase: EglBase
 
     private val whipUrl = "http://10.20.30.41:8889/gameplay/whip"
 
@@ -33,40 +35,61 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         btnStart = findViewById(R.id.btnStart)
-        mediaProjectionManager =
+        projectionManager =
             getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
         initWebRTC()
 
         btnStart.setOnClickListener {
-            startScreenPermission()
+            Log.d(TAG, "Requesting screen permission")
+            startActivityForResult(
+                projectionManager.createScreenCaptureIntent(),
+                SCREEN_CAPTURE_REQUEST
+            )
         }
     }
 
-    private fun startScreenPermission() {
-        val intent = mediaProjectionManager.createScreenCaptureIntent()
-        startActivityForResult(intent, SCREEN_CAPTURE_REQUEST)
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: Intent?
+    ) {
         super.onActivityResult(requestCode, resultCode, data)
 
         if (requestCode == SCREEN_CAPTURE_REQUEST &&
             resultCode == Activity.RESULT_OK &&
             data != null
         ) {
+            Log.d(TAG, "Screen permission granted")
             startStreaming(data)
         }
     }
 
+    // -------------------- WEBRTC INIT --------------------
+
     private fun initWebRTC() {
+
+        Logging.enableLogToDebugOutput(Logging.Severity.LS_INFO)
+
+        eglBase = EglBase.create()
+
         PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions
-                .builder(this)
+            PeerConnectionFactory.InitializationOptions.builder(this)
+                .setEnableInternalTracer(true)
                 .createInitializationOptions()
         )
 
-        peerConnectionFactory = PeerConnectionFactory.builder()
+        factory = PeerConnectionFactory.builder()
+            .setVideoEncoderFactory(
+                DefaultVideoEncoderFactory(
+                    eglBase.eglBaseContext,
+                    true,
+                    true
+                )
+            )
+            .setVideoDecoderFactory(
+                DefaultVideoDecoderFactory(eglBase.eglBaseContext)
+            )
             .createPeerConnectionFactory()
 
         val iceServers = listOf(
@@ -75,110 +98,117 @@ class MainActivity : AppCompatActivity() {
                 .createIceServer()
         )
 
-        peerConnection = peerConnectionFactory.createPeerConnection(
-            iceServers,
+        val config = PeerConnection.RTCConfiguration(iceServers).apply {
+            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+            continualGatheringPolicy =
+                PeerConnection.ContinualGatheringPolicy.GATHER_ONCE
+        }
+
+        pc = factory.createPeerConnection(
+            config,
             object : PeerConnection.Observer {
+
+                override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) {
+                    Log.d(TAG, "ICE gathering: $state")
+                }
+
+                override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
+                    Log.d(TAG, "ICE connection: $state")
+                }
+
+                override fun onSignalingChange(state: PeerConnection.SignalingState) {}
                 override fun onIceCandidate(candidate: IceCandidate) {}
                 override fun onIceCandidatesRemoved(candidates: Array<IceCandidate>) {}
-                override fun onSignalingChange(state: PeerConnection.SignalingState) {}
-                override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {}
-                override fun onIceConnectionReceivingChange(receiving: Boolean) {}
-                override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) {}
                 override fun onAddStream(stream: MediaStream) {}
                 override fun onRemoveStream(stream: MediaStream) {}
                 override fun onDataChannel(dc: DataChannel) {}
                 override fun onRenegotiationNeeded() {}
-                override fun onAddTrack(receiver: RtpReceiver, streams: Array<MediaStream>) {}
+                override fun onAddTrack(
+                    receiver: RtpReceiver,
+                    streams: Array<MediaStream>
+                ) {}
             }
         )!!
     }
 
+    // -------------------- STREAM --------------------
+
     private fun startStreaming(permissionData: Intent) {
-        try {
-            val eglBase = EglBase.create()
 
-            val videoSource = peerConnectionFactory.createVideoSource(false)
-            val videoTrack =
-                peerConnectionFactory.createVideoTrack("SCREEN", videoSource)
+        Log.d(TAG, "Starting screen capture")
 
-            val projectionCallback = object : MediaProjection.Callback() {
+        val videoSource = factory.createVideoSource(false)
+        val videoTrack = factory.createVideoTrack("screen", videoSource)
+
+        val capturer = ScreenCapturerAndroid(
+            permissionData,
+            object : MediaProjection.Callback() {
                 override fun onStop() {
-                    Log.d("WebRTC", "Screen capture stopped")
+                    Log.d(TAG, "MediaProjection stopped")
                 }
             }
+        )
 
-            val capturer = ScreenCapturerAndroid(permissionData, projectionCallback)
+        val helper = SurfaceTextureHelper.create(
+            "ScreenCaptureThread",
+            eglBase.eglBaseContext
+        )
 
-            val surfaceHelper = SurfaceTextureHelper.create(
-                "ScreenCaptureThread",
-                eglBase.eglBaseContext
+        capturer.initialize(helper, this, videoSource.capturerObserver)
+        capturer.startCapture(720, 1280, 30)
+
+        pc.addTrack(videoTrack)
+
+        // 🔥 OBLIGATORIO PARA WHIP
+        pc.addTransceiver(
+            MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
+            RtpTransceiver.RtpTransceiverInit(
+                RtpTransceiver.RtpTransceiverDirection.SEND_ONLY
             )
+        )
 
-            capturer.initialize(
-                surfaceHelper,
-                this,
-                videoSource.capturerObserver
-            )
-
-            capturer.startCapture(720, 1600, 30)
-
-            peerConnection.addTrack(videoTrack)
-
-            createOffer()
-
-        } catch (e: Exception) {
-            Log.e("WebRTC", "Error starting stream: ${e.message}")
-        }
+        createOffer()
     }
 
-    /**
-     * AQUÍ VAN LOS MediaConstraints
-     * WHIP normalmente NO soporta Trickle ICE
-     */
+    // -------------------- WHIP --------------------
+
     private fun createOffer() {
-        val constraints = MediaConstraints()
 
-        constraints.mandatory.add(
-            MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false")
-        )
-        constraints.mandatory.add(
-            MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false")
-        )
-        constraints.mandatory.add(
-            MediaConstraints.KeyValuePair("IceRestart", "false")
-        )
+        val constraints = MediaConstraints().apply {
+            mandatory.add(
+                MediaConstraints.KeyValuePair("IceRestart", "false")
+            )
+            optional.add(
+                MediaConstraints.KeyValuePair("TrickleIce", "false")
+            )
+        }
 
-        constraints.optional.add(
-            MediaConstraints.KeyValuePair("TrickleIce", "false")
-        )
+        pc.createOffer(object : SdpObserver {
 
-        peerConnection.createOffer(object : SdpObserver {
             override fun onCreateSuccess(desc: SessionDescription) {
-                peerConnection.setLocalDescription(object : SdpObserver {
-                    override fun onSetSuccess() {
-                        sendWhipOffer(desc)
-                    }
+                Log.d(TAG, "SDP offer created")
+                pc.setLocalDescription(this, desc)
+            }
 
-                    override fun onSetFailure(error: String?) {
-                        Log.e("WHIP", "Set local SDP failed: $error")
-                    }
-
-                    override fun onCreateSuccess(p0: SessionDescription?) {}
-                    override fun onCreateFailure(p0: String?) {}
-                }, desc)
+            override fun onSetSuccess() {
+                Log.d(TAG, "Local SDP set")
+                sendWhipOffer(pc.localDescription!!)
             }
 
             override fun onCreateFailure(error: String?) {
-                Log.e("WHIP", "Offer failed: $error")
+                Log.e(TAG, "Offer error: $error")
             }
 
-            override fun onSetSuccess() {}
-            override fun onSetFailure(p0: String?) {}
+            override fun onSetFailure(error: String?) {
+                Log.e(TAG, "Set local SDP error: $error")
+            }
+
         }, constraints)
     }
 
     private fun sendWhipOffer(offer: SessionDescription) {
-        val client = OkHttpClient()
+
+        Log.d(TAG, "Sending WHIP offer")
 
         val body = offer.description
             .toRequestBody("application/sdp".toMediaType())
@@ -186,65 +216,42 @@ class MainActivity : AppCompatActivity() {
         val request = Request.Builder()
             .url(whipUrl)
             .post(body)
-            .addHeader("Content-Type", "application/sdp")
             .build()
 
         Thread {
             try {
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        Log.e("WHIP", "HTTP ${response.code}")
+                OkHttpClient().newCall(request).execute().use { res ->
+
+                    Log.d(TAG, "WHIP HTTP ${res.code}")
+
+                    val answerSdp = res.body?.string()
+                    if (answerSdp.isNullOrBlank()) {
+                        Log.e(TAG, "Empty SDP answer")
                         return@use
                     }
 
-                    val answerSdp = response.body?.string()
-                    if (answerSdp.isNullOrEmpty()) {
-                        Log.e("WHIP", "Empty SDP answer")
-                        return@use
-                    }
-
-                    Log.d("WHIP", "SDP answer received")
-
-                    val answer = SessionDescription(
-                        SessionDescription.Type.ANSWER,
-                        answerSdp
-                    )
-
-                    peerConnection.setRemoteDescription(
+                    pc.setRemoteDescription(
                         object : SdpObserver {
                             override fun onSetSuccess() {
-                                Log.d(
-                                    "WHIP",
-                                    "Remote SDP set — STREAMING ACTIVE"
-                                )
+                                Log.d(TAG, "STREAMING ACTIVE 🚀")
                             }
 
                             override fun onSetFailure(error: String?) {
-                                Log.e(
-                                    "WHIP",
-                                    "Set remote SDP failed: $error"
-                                )
+                                Log.e(TAG, "Set remote SDP error: $error")
                             }
 
                             override fun onCreateSuccess(p0: SessionDescription?) {}
                             override fun onCreateFailure(p0: String?) {}
                         },
-                        answer
+                        SessionDescription(
+                            SessionDescription.Type.ANSWER,
+                            answerSdp
+                        )
                     )
                 }
             } catch (e: Exception) {
-                Log.e("WHIP", "WHIP error: ${e.message}")
+                Log.e(TAG, "WHIP error", e)
             }
         }.start()
     }
 }
-
-
-
-
-
-
-
-
-
-
