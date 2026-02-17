@@ -1,5 +1,8 @@
 package com.hiran.streamer
 
+import android.app.Activity
+import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
@@ -12,7 +15,13 @@ import org.webrtc.*
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        private const val SCREEN_CAPTURE_REQUEST = 1001
+    }
+
     private lateinit var btnStart: Button
+    private lateinit var mediaProjectionManager: MediaProjectionManager
+
     private lateinit var peerConnectionFactory: PeerConnectionFactory
     private lateinit var peerConnection: PeerConnection
 
@@ -23,18 +32,32 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         btnStart = findViewById(R.id.btnStart)
+        mediaProjectionManager =
+            getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
         initWebRTC()
 
         btnStart.setOnClickListener {
-            startWhipStreaming()
+            startScreenPermission()
+        }
+    }
+
+    private fun startScreenPermission() {
+        val intent = mediaProjectionManager.createScreenCaptureIntent()
+        startActivityForResult(intent, SCREEN_CAPTURE_REQUEST)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == SCREEN_CAPTURE_REQUEST && resultCode == Activity.RESULT_OK && data != null) {
+            startStreaming(data)
         }
     }
 
     private fun initWebRTC() {
         PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(this)
-                .createInitializationOptions()
+            PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions()
         )
 
         peerConnectionFactory = PeerConnectionFactory.builder().createPeerConnectionFactory()
@@ -61,10 +84,25 @@ class MainActivity : AppCompatActivity() {
         )!!
     }
 
-    private fun startWhipStreaming() {
+    private fun startStreaming(permissionData: Intent) {
+        val eglBase = EglBase.create()
+
+        val videoSource = peerConnectionFactory.createVideoSource(false)
+        val videoTrack = peerConnectionFactory.createVideoTrack("SCREEN", videoSource)
+
+        val capturer = ScreenCapturerAndroid(permissionData, object : MediaProjection.Callback() {})
+        val surfaceHelper = SurfaceTextureHelper.create("ScreenCaptureThread", eglBase.eglBaseContext)
+
+        capturer.initialize(surfaceHelper, this, videoSource.capturerObserver)
+        capturer.startCapture(720, 1600, 30)
+
+        peerConnection.addTrack(videoTrack)
+
+        createOffer()
+    }
+
+    private fun createOffer() {
         val constraints = MediaConstraints()
-        constraints.mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
-        constraints.mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false"))
 
         peerConnection.createOffer(object : SdpObserver {
             override fun onCreateSuccess(desc: SessionDescription) {
@@ -80,7 +118,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onCreateFailure(error: String?) {
-                Log.e("WHIP", "SDP create failed: $error")
+                Log.e("WHIP", "Offer failed: $error")
             }
 
             override fun onSetSuccess() {}
@@ -99,11 +137,12 @@ class MainActivity : AppCompatActivity() {
             .post(body)
             .build()
 
-        client.newCall(request).execute().use { response ->
-            Log.d("WHIP", "Response: ${response.code}")
+        client.newCall(request).execute().use {
+            Log.d("WHIP", "Response: ${it.code}")
         }
     }
 }
+
 
 
 
