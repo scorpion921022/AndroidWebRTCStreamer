@@ -2,6 +2,7 @@ package com.hiran.streamer
 
 import android.app.Activity
 import android.content.Intent
+import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.util.Log
@@ -90,9 +91,17 @@ class MainActivity : AppCompatActivity() {
         val videoSource = peerConnectionFactory.createVideoSource(false)
         val videoTrack = peerConnectionFactory.createVideoTrack("SCREEN", videoSource)
 
-        val capturer = ScreenCapturerAndroid(permissionData, object : MediaProjection.Callback() {})
-        val surfaceHelper = SurfaceTextureHelper.create("ScreenCaptureThread", eglBase.eglBaseContext)
+        // ✅ CORREGIDO: callback real para MediaProjection
+        val capturer = ScreenCapturerAndroid(
+            permissionData,
+            object : MediaProjection.Callback() {
+                override fun onStop() {
+                    Log.d("WebRTC", "Screen capture stopped")
+                }
+            }
+        )
 
+        val surfaceHelper = SurfaceTextureHelper.create("ScreenCaptureThread", eglBase.eglBaseContext)
         capturer.initialize(surfaceHelper, this, videoSource.capturerObserver)
         capturer.startCapture(720, 1600, 30)
 
@@ -128,10 +137,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun sendWhipOffer(offer: SessionDescription) {
         val client = OkHttpClient()
-
-        val body = offer.description
-            .toRequestBody("application/sdp".toMediaType())
-
+        val body = offer.description.toRequestBody("application/sdp".toMediaType())
         val request = Request.Builder()
             .url(whipUrl)
             .post(body)
@@ -142,6 +148,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 }
+
 
 
 
