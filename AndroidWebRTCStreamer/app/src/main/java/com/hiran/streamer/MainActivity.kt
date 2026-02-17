@@ -86,29 +86,43 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startStreaming(permissionData: Intent) {
+    try {
         val eglBase = EglBase.create()
 
+        // Crear video source
         val videoSource = peerConnectionFactory.createVideoSource(false)
         val videoTrack = peerConnectionFactory.createVideoTrack("SCREEN", videoSource)
 
-        // ✅ CORREGIDO: callback real para MediaProjection
-        val capturer = ScreenCapturerAndroid(
-            permissionData,
-            object : MediaProjection.Callback() {
-                override fun onStop() {
-                    Log.d("WebRTC", "Screen capture stopped")
-                }
+        // Callback real para MediaProjection
+        val mediaProjectionCallback = object : MediaProjection.Callback() {
+            override fun onStop() {
+                Log.d("WebRTC", "Screen capture stopped")
             }
-        )
+        }
 
+        // Crear capturador de pantalla
+        val capturer = ScreenCapturerAndroid(permissionData, mediaProjectionCallback)
+
+        // Surface helper en hilo separado
         val surfaceHelper = SurfaceTextureHelper.create("ScreenCaptureThread", eglBase.eglBaseContext)
+
+        // Inicializar capturador
         capturer.initialize(surfaceHelper, this, videoSource.capturerObserver)
+
+        // Captura a 720x1600 @30fps
         capturer.startCapture(720, 1600, 30)
 
+        // Agregar track al PeerConnection
         peerConnection.addTrack(videoTrack)
 
+        // Crear oferta WHIP
         createOffer()
+
+    } catch (e: Exception) {
+        Log.e("WebRTC", "Error starting stream: ${e.message}")
     }
+}
+
 
     private fun createOffer() {
         val constraints = MediaConstraints()
@@ -148,6 +162,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 }
+
 
 
 
