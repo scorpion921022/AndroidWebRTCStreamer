@@ -1,25 +1,55 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+diff --git a/AndroidWebRTCStreamer/app/src/main/AndroidManifest.xml b/AndroidWebRTCStreamer/app/src/main/AndroidManifest.xml
+index 63d99d361403093900050bfdaf53a822c45edf5a..62c415f52f55cb29c51226bc7d9bc39ff7384913 100644
+--- a/AndroidWebRTCStreamer/app/src/main/AndroidManifest.xml
++++ b/AndroidWebRTCStreamer/app/src/main/AndroidManifest.xml
+@@ -1,26 +1,35 @@
+-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+-
+-    <uses-permission android:name="android.permission.INTERNET"/>
+-    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android">
++
++    <uses-permission android:name="android.permission.INTERNET"/>
++    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
++    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
++    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
++    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
++    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+ 
+     <application
+         android:theme="@style/Theme.AppCompat.Light.NoActionBar"
+         android:allowBackup="true"
+         android:label="WebRTC Stream">
+ 
+-        <activity
+-            android:name=".MainActivity"
+-            android:exported="true">
++        <activity
++            android:name=".MainActivity"
++            android:exported="true">
+ 
+             <intent-filter>
+                 <action android:name="android.intent.action.MAIN"/>
+                 <category android:name="android.intent.category.LAUNCHER"/>
+             </intent-filter>
+ 
+-        </activity>
+-    </application>
+-</manifest>
++        </activity>
++
++        <service
++            android:name=".StreamingService"
++            android:exported="false"
++            android:foregroundServiceType="mediaProjection|microphone"/>
++    </application>
++</manifest>
+ 
+ 
+ 
+ 
+>
 
-    <uses-permission android:name="android.permission.INTERNET"/>
-    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-
-    <application
-        android:theme="@style/Theme.AppCompat.Light.NoActionBar"
-        android:allowBackup="true"
-        android:label="WebRTC Stream">
-
-        <activity
-            android:name=".MainActivity"
-            android:exported="true">
-
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-
-        </activity>
-    </application>
-</manifest>
 
 
 
